@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from datetime import datetime
+import psutil
 
 app = FastAPI()
 
@@ -17,18 +18,41 @@ app.add_middleware(
 async def root():
     return {
         "status": "NETFORESIGHT backend running",
-        "websocket": "/ws/alerts"
+        "websocket": "/ws/alerts",
+        "traffic_source": "local_machine"
+    }
+
+def get_live_traffic():
+    counters = psutil.net_io_counters()
+    connections = psutil.net_connections(kind="inet")
+
+    active_connections = sum(
+        1 for connection in connections
+        if connection.status in {"ESTABLISHED", "SYN_SENT", "SYN_RECV"}
+    )
+
+    return {
+        "bytes_sent": counters.bytes_sent,
+        "bytes_recv": counters.bytes_recv,
+        "packets_sent": counters.packets_sent,
+        "packets_recv": counters.packets_recv,
+        "connections": active_connections
     }
 
 @app.get("/api/alerts")
 async def alerts():
+    traffic = get_live_traffic()
+
     return {
         "status": "ok",
-        "source": "backend",
-        "risk": 78,
-        "next_attack": "Lateral Movement",
-        "mitre": "T1021",
-        "confidence": 0.78
+        "source": "local_machine",
+        "risk": 0,
+        "next_attack": "Analyzing",
+        "mitre": "—",
+        "confidence": 0,
+        "flows": traffic["connections"],
+        "packets": traffic["packets_sent"] + traffic["packets_recv"],
+        "anomaly": 0
     }
 
 class ConnectionManager:
@@ -57,69 +81,52 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 async def generate_live_data():
-    events = [
-        {
-            "event": "Port Scan detected",
-            "risk": 52,
-            "next_attack": "Credential Access",
-            "mitre": "T1046",
-            "confidence": 0.71,
-            "flows": 94,
-            "packets": 2860,
-            "anomaly": 3.8,
-            "status": "AT RISK"
-        },
-        {
-            "event": "SSH Brute Force detected",
-            "risk": 68,
-            "next_attack": "Lateral Movement",
-            "mitre": "T1110",
-            "confidence": 0.79,
-            "flows": 121,
-            "packets": 4120,
-            "anomaly": 6.1,
-            "status": "AT RISK"
-        },
-        {
-            "event": "Lateral Movement detected",
-            "risk": 78,
-            "next_attack": "Command Execution",
-            "mitre": "T1021",
-            "confidence": 0.84,
-            "flows": 154,
-            "packets": 5830,
-            "anomaly": 7.6,
-            "status": "UNDER ATTACK"
-        },
-        {
-            "event": "Suspicious Traffic detected",
-            "risk": 86,
-            "next_attack": "Data Exfiltration",
-            "mitre": "T1041",
-            "confidence": 0.91,
-            "flows": 187,
-            "packets": 7210,
-            "anomaly": 8.8,
-            "status": "UNDER ATTACK"
-        }
-    ]
-
-    index = 0
+    previous = get_live_traffic()
 
     while True:
+        await asyncio.sleep(1)
+
+        current = get_live_traffic()
+
+        packets_delta = (
+            current["packets_sent"] + current["packets_recv"]
+            - previous["packets_sent"] - previous["packets_recv"]
+        )
+
+        bytes_delta = (
+            current["bytes_sent"] + current["bytes_recv"]
+            - previous["bytes_sent"] - previous["bytes_recv"]
+        )
+
+        outgoing_packets = current["packets_sent"] - previous["packets_sent"]
+        incoming_packets = current["packets_recv"] - previous["packets_recv"]
+
+        packets_per_second = max(0, packets_delta)
+        flows_per_second = max(0, current["connections"])
+
+        data = {
+            "type": "network_update",
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "event": "Live network traffic",
+            "risk": 0,
+            "next_attack": "Analyzing",
+            "mitre": "—",
+            "confidence": 0,
+            "flows": flows_per_second,
+            "packets": packets_per_second,
+            "anomaly": 0,
+            "status": "MONITORING",
+            "bytes_per_second": max(0, bytes_delta),
+            "incoming_packets": max(0, incoming_packets),
+            "outgoing_packets": max(0, outgoing_packets),
+            "active_connections": current["connections"],
+            "source": "local_machine"
+        }
+
         if manager.active_connections:
-            event = events[index]
-
-            data = {
-                "type": "network_update",
-                "time": datetime.now().strftime("%H:%M:%S"),
-                **event
-            }
-
             await manager.broadcast(data)
-            index = (index + 1) % len(events)
 
-        await asyncio.sleep(5)
+        previous = current
 
 @app.on_event("startup")
 async def startup_event():
