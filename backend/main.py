@@ -264,7 +264,7 @@ def packet_capture_worker():
         print(f"Live packet capture unavailable: {exc}")
     finally:
         loop.close()
-        
+
 def get_capture_snapshot():
     with stats_lock:
         return {
