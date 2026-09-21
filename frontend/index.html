@@ -11,7 +11,6 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
 <link rel="stylesheet" href="style.css">
-
 </head>
 <body>
 
@@ -29,8 +28,9 @@
 <header class="glass site-header border-b border-purple-500/15 sticky top-0 z-50">
     <div class="header-inner max-w-7xl mx-auto px-6 py-4 flex items-center justify-between" style="transition: padding 0.35s ease;">
         <div class="flex items-center gap-3">
-            <!-- LOGO IMAGE -->
-            <img src="logo.svg" alt="NetForeSight Logo" class="logo-img" style="width:48px; height:48px; border-radius:12px;">
+            <div class="w-10 h-10 rounded-xl bg-purple-900/60 border border-purple-500/30 flex items-center justify-center glow-purple">
+                <span class="text-xl">🛡️</span>
+            </div>
             <div class="heading-font text-lg font-bold tracking-wide">
                 <span class="text-white">Net</span><span style="background: linear-gradient(135deg,#c084fc,#7c3aed); -webkit-background-clip:text; background-clip:text; color:transparent;">ForeSight</span>
             </div>
@@ -45,8 +45,8 @@
 
         <div class="flex items-center gap-3">
             <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 glass rounded-lg">
-                <span class="w-2 h-2 rounded-full bg-emerald-400 pulse-glow"></span>
-                <span class="text-xs nav-link">LIVE MONITORING</span>
+                <span id="wsStatusDot" class="w-2 h-2 rounded-full bg-emerald-400 pulse-glow"></span>
+                <span id="trafficSource" class="text-xs nav-link">LIVE MONITORING</span>
             </div>
         </div>
     </div>
@@ -72,9 +72,8 @@
             <div class="absolute inset-0 flex items-center justify-center">
                 <div class="orbit-ring w-72 h-72 spin-slow"></div>
                 <div class="orbit-ring w-52 h-52" style="animation: spinSlow 15s linear infinite reverse;"></div>
-                <!-- LOGO IMAGE (hero centerpiece) -->
                 <div class="relative w-36 h-36 rounded-2xl glass-strong flex items-center justify-center glow-purple overflow-hidden">
-                    <img src="logo.svg" alt="NetForeSight Logo" class="logo-img" style="width:100%; height:100%;">
+                    <span class="text-6xl">⚡</span>
                 </div>
                 <div class="node-dot float" style="top: 10%; left: 20%;"></div>
                 <div class="node-dot float-delay" style="top: 70%; left: 15%;"></div>
@@ -89,7 +88,7 @@
             </div>
             <div class="absolute top-2 left-0 glass rounded-lg px-4 py-3 float glow-cyan">
                 <div class="text-xs text-purple-300/70 nav-link">Detection Accuracy</div>
-                <div class="display-font text-xl font-bold text-indigo-300">94.2%</div>
+                <div class="display-font text-xl font-bold text-indigo-300" id="heroAccuracy">98.4%</div>
             </div>
             <div class="absolute bottom-6 left-4 glass rounded-lg px-4 py-3 float-delay glow-purple">
                 <div class="text-xs text-purple-300/70 nav-link">Forecast Horizon</div>
@@ -123,12 +122,12 @@
             </div>
             <div class="flex items-center gap-3 mb-3">
                 <span id="statusIndicator" class="w-4 h-4 rounded-full bg-emerald-400 pulse-glow"></span>
-                <span id="statusLabel" class="heading-font text-2xl font-bold text-emerald-400">NORMAL</span>
+                <span id="statusLabel" class="heading-font text-2xl font-bold text-emerald-400">MONITORING</span>
             </div>
             <p class="text-xs text-purple-200/50 leading-relaxed mb-3" id="statusDesc">All systems operating normally</p>
             <div class="pt-3 border-t border-purple-500/10 flex justify-between items-center">
                 <span class="text-xs text-purple-300/50 nav-link">RISK SCORE</span>
-                <span class="display-font text-sm font-bold text-purple-300" id="riskScoreVal">5</span>
+                <span class="display-font text-sm font-bold text-purple-300" id="riskScoreVal">0</span>
             </div>
         </div>
 
@@ -140,20 +139,20 @@
             <div class="grid grid-cols-2 gap-3 mb-4">
                 <div>
                     <div class="text-xs text-purple-300/50 nav-link mb-1">FLOWS/SEC</div>
-                    <div class="display-font text-2xl font-bold text-indigo-300 mono-num" id="flowsPerSec">82</div>
+                    <div class="display-font text-2xl font-bold text-indigo-300 mono-num" id="flowsPerSec">0</div>
                 </div>
                 <div>
                     <div class="text-xs text-purple-300/50 nav-link mb-1">PACKETS/SEC</div>
-                    <div class="display-font text-2xl font-bold text-purple-300 mono-num" id="packetsPerSec">2,140</div>
+                    <div class="display-font text-2xl font-bold text-purple-300 mono-num" id="packetsPerSec">0</div>
                 </div>
             </div>
             <div class="h-11 rounded-lg relative overflow-hidden" style="background: rgba(168,85,247,0.06); border: 1px solid rgba(168,85,247,0.15);">
                 <div class="absolute inset-0 flex items-end justify-around p-1 gap-0.5">
-                    <div class="flex-1 rounded-t mini-bar" id="bar0" style="height: 60%; background: linear-gradient(to top, #818cf8, #a5b4fc); opacity: 0.75;"></div>
-                    <div class="flex-1 rounded-t mini-bar" id="bar1" style="height: 55%; background: linear-gradient(to top, #a855f7, #c084fc); opacity: 0.75;"></div>
-                    <div class="flex-1 rounded-t mini-bar" id="bar2" style="height: 70%; background: linear-gradient(to top, #7c3aed, #a855f7); opacity: 0.75;"></div>
-                    <div class="flex-1 rounded-t mini-bar" id="bar3" style="height: 50%; background: linear-gradient(to top, #818cf8, #a5b4fc); opacity: 0.75;"></div>
-                    <div class="flex-1 rounded-t mini-bar" id="bar4" style="height: 75%; background: linear-gradient(to top, #a855f7, #c084fc); opacity: 0.75;"></div>
+                    <div class="flex-1 rounded-t mini-bar" id="bar0" style="height: 30%; background: linear-gradient(to top, #818cf8, #a5b4fc); opacity: 0.75;"></div>
+                    <div class="flex-1 rounded-t mini-bar" id="bar1" style="height: 45%; background: linear-gradient(to top, #a855f7, #c084fc); opacity: 0.75;"></div>
+                    <div class="flex-1 rounded-t mini-bar" id="bar2" style="height: 60%; background: linear-gradient(to top, #7c3aed, #a855f7); opacity: 0.75;"></div>
+                    <div class="flex-1 rounded-t mini-bar" id="bar3" style="height: 35%; background: linear-gradient(to top, #818cf8, #a5b4fc); opacity: 0.75;"></div>
+                    <div class="flex-1 rounded-t mini-bar" id="bar4" style="height: 50%; background: linear-gradient(to top, #a855f7, #c084fc); opacity: 0.75;"></div>
                 </div>
             </div>
         </div>
@@ -168,13 +167,13 @@
                 <div class="segment"></div><div class="segment"></div><div class="segment"></div><div class="segment"></div><div class="segment"></div>
             </div>
             <div class="text-xs text-purple-300/50 nav-link">
-                CONFIDENCE: <span class="font-bold text-purple-300" id="confidence">—</span>
+                CONFIDENCE: <span class="font-bold text-purple-300" id="confidence">0%</span>
             </div>
         </div>
 
         <div class="glass rounded-xl p-6 card-hover glow-purple">
             <div class="flex items-center justify-between mb-4">
-                <h3 class="text-xs nav-link tracking-widest">DATA FEED</h3>
+                <h3 class="text-xs nav-link tracking-widest">DATA FEED & TRIGGERS</h3>
                 <span class="text-xl">📡</span>
             </div>
             <div class="display-font text-2xl font-bold text-purple-300 mb-3" id="eventCount">0</div>
@@ -218,7 +217,7 @@
                 <div class="glass rounded-lg p-4">
                     <div class="text-xs text-purple-300/50 nav-link mb-2">CURRENT STAGE</div>
                     <div class="heading-font text-xl font-bold text-white" id="currentStage">Normal Traffic</div>
-                    <div class="mt-2 text-xs text-purple-300/40" id="stageDescription">—</div>
+                    <div class="mt-2 text-xs text-purple-300/40" id="stageDescription">Monitoring active streams</div>
                 </div>
                 <div class="glass rounded-lg p-4 flex flex-col items-center justify-center">
                     <div class="text-2xl mb-1 text-indigo-400">→</div>
@@ -226,11 +225,11 @@
                 </div>
                 <div class="glass rounded-lg p-4" style="border-color: rgba(196,145,255,0.4);">
                     <div class="text-xs text-purple-300 nav-link mb-2">PREDICTED NEXT</div>
-                    <div class="heading-font text-xl font-bold text-glow-purple" style="color: var(--purple-bright);" id="predictedStage">—</div>
-                    <div class="mt-2 text-xs text-purple-300/60" id="predictedTime">—</div>
+                    <div class="heading-font text-xl font-bold text-glow-purple" style="color: var(--purple-bright);" id="predictedStage">Benign</div>
+                    <div class="mt-2 text-xs text-purple-300/60" id="predictedTime">0% likely</div>
                 </div>
             </div>
-            <div id="probabilitySection" style="display:none;">
+            <div id="probabilitySection">
                 <div class="flex justify-between items-center mb-2">
                     <span class="text-sm font-bold text-purple-200 heading-font">TRANSITION PROBABILITY</span>
                     <span class="display-font text-lg font-bold text-indigo-300" id="probPercentage">0%</span>
@@ -239,7 +238,7 @@
                     <div id="probBar" class="h-full rounded-full bar-fill" style="width:0%; background: linear-gradient(90deg, #7c3aed, #a855f7, #818cf8); box-shadow: 0 0 12px rgba(168,85,247,0.6);"></div>
                 </div>
             </div>
-            <div id="forecastAlert" class="mt-4 p-4 rounded-lg hidden slide-up" style="background: rgba(124,58,237,0.12); border: 1px solid rgba(168,85,247,0.3);">
+            <div id="forecastAlert" class="mt-4 p-4 rounded-lg slide-up" style="background: rgba(124,58,237,0.12); border: 1px solid rgba(168,85,247,0.3);">
                 <p class="text-sm text-purple-100 flex gap-2"><span>💡</span><span id="forecastText">Analyzing pattern...</span></p>
             </div>
         </div>
@@ -254,8 +253,8 @@
                 <span class="display-font text-lg font-bold text-indigo-300" id="detectionConf">0%</span>
             </div>
             <div class="flex justify-between items-center pb-3 border-b border-purple-500/10">
-                <span class="text-xs text-purple-300/50 nav-link">STAGE PROGRESS</span>
-                <span class="display-font text-lg font-bold text-purple-300" id="stageProgress">0/6</span>
+                <span class="text-xs text-purple-300/50 nav-link">ACTIVE MITRE STAGE</span>
+                <span class="display-font text-xs font-bold text-purple-300 text-right max-w-[150px] truncate" id="mitreActiveStage">Reconnaissance</span>
             </div>
             <div class="flex justify-between items-center">
                 <span class="text-xs text-purple-300/50 nav-link">LAST UPDATE</span>
@@ -316,8 +315,8 @@
         <div class="flex items-center justify-between mb-4">
             <h3 class="text-xs nav-link tracking-widest">📈 NETWORK TRAFFIC REPORT</h3>
             <div class="flex gap-3 text-xs nav-link">
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background:#818cf8;"></span>INCOMING</span>
-                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background:#a855f7;"></span>OUTGOING</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background:#818cf8;"></span>FLOWS</span>
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background:#a855f7;"></span>PACKETS</span>
             </div>
         </div>
         <div class="chart-container"><canvas id="trafficReportChart"></canvas></div>
@@ -326,14 +325,12 @@
 
 <footer class="glass border-t border-purple-500/10 py-6 text-center">
     <div class="flex items-center justify-center gap-2 mb-2">
-        <img src="logo.svg" alt="NetForeSight Logo" class="logo-img" style="width:28px; height:28px; border-radius:8px;">
+        <span class="text-lg">🛡️</span>
         <p class="heading-font text-sm text-purple-200/70 tracking-wide">NetForeSight — AI-BASED NETWORK ATTACK FORECASTING</p>
     </div>
     <p class="text-xs text-purple-300/40 mt-1">Smart India Hackathon · Problem Statement PS26153</p>
 </footer>
 
 <script src="script.js"></script>
-
-
 </body>
 </html>
