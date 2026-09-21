@@ -264,7 +264,7 @@ def packet_capture_worker():
         print(f"Live packet capture unavailable: {exc}")
     finally:
         loop.close()
-
+        
 def get_capture_snapshot():
     with stats_lock:
         return {
@@ -314,8 +314,54 @@ def build_network_update(packets_per_second, bytes_per_second):
     else:
         padded_buffer = buffer[-5:]
 
-    raw_window = np.array(padded_buffer, dtype=np.float32)
+    #raw_window = np.array(padded_buffer, dtype=np.float32)
+    # =====================================================================
+    # MULTI-STAGE SEQUENCE TEST SUITE
+    # =====================================================================
+
+    # 1. Define distinct state feature vectors (DstPort, Proto, FlowDur, TotFwdPkts, TotBwdPkts, ...)
+    BENIGN_VEC     = [80.0, 6.0, 0.5, 2.0, 2.0, 100.0, 500.0, 50.0, 0.0, 1200.0, 8.0, 0.1, 0.01, 0.0, 0.0, 1.0]
+    SSH_BRUTE_VEC  = [22.0, 6.0, 0.001, 250.0, 0.0, 12000.0, 0.0, 1460.0, 0.0, 5000000.0, 100000.0, 0.0001, 0.00001, 1.0, 0.0, 0.0]
+    PORT_SCAN_VEC  = [443.0, 6.0, 0.0005, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10000.0, 2000.0, 0.0001, 0.00001, 1.0, 0.0, 0.0]
+    POST_EXPLOIT_VEC = [22.0, 6.0, 0.05, 45.0, 40.0, 3500.0, 8000.0, 512.0, 64.0, 230000.0, 1700.0, 0.001, 0.0005, 0.0, 0.0, 1.0]
+
+    # 2. Define test scenarios
+    test_scenarios = {
+        "Scenario A (Pure SSH Brute Force)": 
+            np.array([SSH_BRUTE_VEC] * 5, dtype=np.float32),
+            
+        "Scenario B (SSH Brute Force -> Post-Exploitation Transition)": 
+            np.array([SSH_BRUTE_VEC, SSH_BRUTE_VEC, SSH_BRUTE_VEC, POST_EXPLOIT_VEC, POST_EXPLOIT_VEC], dtype=np.float32),
+            
+        "Scenario C (Port Scan -> SSH Brute Force Transition)": 
+            np.array([PORT_SCAN_VEC, PORT_SCAN_VEC, PORT_SCAN_VEC, SSH_BRUTE_VEC, SSH_BRUTE_VEC], dtype=np.float32),
+            
+        "Scenario D (Pure Benign Baseline)": 
+            np.array([BENIGN_VEC] * 5, dtype=np.float32),
+    }
+
+    # 3. Execute test suite and print results directly to console
+    print("\n" + "="*60)
+    print("     RUNNING SEQUENTIAL MODEL TRANSITION TEST SUITE     ")
+    print("="*60)
+
+    for name, window in test_scenarios.items():
+        res = analyze_sequence_window(window)
+        current = res.get("predicted_attack", "Unknown") if res else "N/A"
+        next_stage = res.get("predicted_next_attack", "Unknown") if res else "N/A"
+        confidence = res.get("confidence", 0.0) if res else 0.0
+        
+        print(f"\n[+] {name}")
+        print(f"    --> Detected Current Stage : {current}")
+        print(f"    --> Predicted Next Stage    : {next_stage}")
+        print(f"    --> Confidence             : {confidence:.2%}")
+
+    print("\n" + "="*60 + "\n")
+
+    # Use Scenario B for the live application flow
+    raw_window = test_scenarios["Scenario B (SSH Brute Force -> Post-Exploitation Transition)"]
     inference = analyze_sequence_window(raw_window)
+    #inference = analyze_sequence_window(raw_window)
 
     if inference:
         risk = inference["risk_score"]
