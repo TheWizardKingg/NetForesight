@@ -275,7 +275,7 @@ const ATTACK_CHAIN = [
       alert:"CRITICAL: Data exfiltration underway", anomaly:0.74 },
 ];
 
-let STATE = { step:0, flows:82, packets:2140, risk:5, anomaly:0, trafficHistory:[] };
+let STATE = { step:0, flows:0, packets:0, risk:0, anomaly:0, trafficHistory:[] };
 for (let i = 0; i < 20; i++) {
     STATE.trafficHistory.push({ incoming: 2100 + Math.random()*100, outgoing: 1600 + Math.random()*100 });
 }
@@ -419,49 +419,78 @@ function updateUI(){
     updateTrafficChart();
 }
 
-function jitterTraffic(){
-    const risk = STATE.risk;
-    STATE.flows = Math.max(10, Math.round(80 + risk*3 + rand(-15,15)));
-    STATE.packets = Math.max(200, Math.round(2100 + risk*60 + rand(-200,200)));
+function applyLiveNetworkData(data){
+    STATE.flows = Number(data.flows ?? data.active_connections ?? 0);
+    STATE.packets = Number(data.packets ?? 0);
+    STATE.risk = Number(data.risk ?? 0);
+    STATE.anomaly = Number(data.anomaly ?? 0);
+
+    const incoming = Number(data.incoming_packets ?? 0);
+    const outgoing = Number(data.outgoing_packets ?? 0);
 
     STATE.trafficHistory.push({
-        incoming: Math.max(200, 2100 + risk*55 + rand(-150,150)),
-        outgoing: Math.max(150, 1600 + risk*40 + rand(-120,120)),
+        incoming,
+        outgoing
     });
+
     if(STATE.trafficHistory.length > 24) STATE.trafficHistory.shift();
+
+    const sourceEl = document.getElementById("trafficSource");
+    if(sourceEl) sourceEl.textContent = data.source === "pyshark_live_capture" ? "LIVE • TSHARK" : "LIVE • SYSTEM";
+
+    if(data.next_attack){
+        const stageIndex = ATTACK_CHAIN.findIndex(stage =>
+            stage.name.toLowerCase() === String(data.next_attack).toLowerCase() ||
+            String(stage.next || "").toLowerCase() === String(data.next_attack).toLowerCase()
+        );
+        if(stageIndex >= 0) STATE.step = stageIndex;
+    }
 
     for(let i = 0; i < 5; i++){
         const bar = document.getElementById(`bar${i}`);
-        if(bar) bar.style.height = Math.max(15, Math.min(95, 45 + risk*0.5 + rand(-18,18))) + "%";
+        if(bar){
+            const value = Math.min(95, 15 + Math.log10(Math.max(1, STATE.packets)) * 15 + rand(-5,5));
+            bar.style.height = Math.max(15, value) + "%";
+        }
     }
 
     updateUI();
 }
 
-function advanceStep(){
-    if(STATE.step < ATTACK_CHAIN.length - 1){
-        STATE.step += 1;
-    } else {
-        setTimeout(()=>{
-            STATE.step = 0; STATE.risk = 5; STATE.anomaly = 0; updateUI();
-            showToast("MONITORING RESUMED", "Attack simulation reset — network back to baseline.", "#34d399");
-        }, 2500);
-        return;
-    }
-    const stage = ATTACK_CHAIN[STATE.step];
-    STATE.risk = stage.risk;
-    STATE.anomaly = stage.anomaly;
-    updateUI();
+function connectNetForeSightWebSocket(){
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const host = window.location.hostname || "127.0.0.1";
+    const socket = new WebSocket(`${protocol}://${host}:8000/ws/alerts`);
 
-    const toastColor = stage.risk < 40 ? "#34d399" : stage.risk <= 70 ? "#fbbf24" : "#fb7185";
-    showToast(stage.fullName, stage.alert, toastColor);
+    window.netForeSightSocket = socket;
+
+    socket.addEventListener("open", () => {
+        const sourceEl = document.getElementById("trafficSource");
+        if(sourceEl) sourceEl.textContent = "CONNECTING • LIVE";
+    });
+
+    socket.addEventListener("message", event => {
+        try {
+            const data = JSON.parse(event.data);
+            if(data.type === "network_update") applyLiveNetworkData(data);
+        } catch(error) {
+            console.error("Invalid NetForeSight WebSocket message:", error);
+        }
+    });
+
+    socket.addEventListener("close", () => {
+        const sourceEl = document.getElementById("trafficSource");
+        if(sourceEl) sourceEl.textContent = "BACKEND OFFLINE";
+        setTimeout(connectNetForeSightWebSocket, 2000);
+    });
+
+    socket.addEventListener("error", () => socket.close());
 }
 
 buildTreeAndRender();
 initCharts();
 updateUI();
-setInterval(jitterTraffic, 700);
-setInterval(advanceStep, 4200);
+connectNetForeSightWebSocket();
 
 /* ================= NAV SCROLLSPY ================= */
 (function initScrollspy(){
