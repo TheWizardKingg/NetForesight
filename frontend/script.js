@@ -3,21 +3,21 @@ const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)
 const _animFrames = new WeakMap();
 
 /** Smoothly counts a number element from its current value to `to`. */
-function animateValue(el, to, { decimals = 0, duration = 550, suffix = '' } = {}){
-    if(!el) return;
+function animateValue(el, to, { decimals = 0, duration = 550, suffix = '' } = {}) {
+    if (!el) return;
     const from = parseFloat((el.textContent || '0').replace(/[^0-9.\-]/g, '')) || 0;
-    if(prefersReducedMotion || Math.abs(to - from) < (decimals ? 0.05 : 1)){
+    if (prefersReducedMotion || Math.abs(to - from) < (decimals ? 0.05 : 1)) {
         el.textContent = to.toFixed(decimals) + suffix;
         return;
     }
-    if(_animFrames.has(el)) cancelAnimationFrame(_animFrames.get(el));
+    if (_animFrames.has(el)) cancelAnimationFrame(_animFrames.get(el));
     const start = performance.now();
-    const ease = t => 1 - Math.pow(1 - t, 3); // cubic ease-out
-    function tick(now){
+    const ease = t => 1 - Math.pow(1 - t, 3);
+    function tick(now) {
         const p = Math.min(1, (now - start) / duration);
         const val = from + (to - from) * ease(p);
         el.textContent = (decimals ? val.toFixed(decimals) : Math.round(val).toLocaleString()) + suffix;
-        if(p < 1){
+        if (p < 1) {
             _animFrames.set(el, requestAnimationFrame(tick));
         } else {
             el.textContent = (decimals ? to.toFixed(decimals) : to.toLocaleString()) + suffix;
@@ -26,18 +26,18 @@ function animateValue(el, to, { decimals = 0, duration = 550, suffix = '' } = {}
     _animFrames.set(el, requestAnimationFrame(tick));
 }
 
-/** Briefly flashes an element to draw the eye to a changed value. */
-function flashValue(el){
-    if(!el || prefersReducedMotion) return;
+/** Briefly flashes an element to draw attention to value updates. */
+function flashValue(el) {
+    if (!el || prefersReducedMotion) return;
     el.classList.remove('value-flash');
-    void el.offsetWidth; // restart animation
+    void el.offsetWidth;
     el.classList.add('value-flash');
 }
 
-/** Pushes a live alert into the toast feed, auto-dismissing after a few seconds. */
-function showToast(title, body, color = '#a855f7'){
+/** Pushes a live alert into the toast feed */
+function showToast(title, body, color = '#a855f7') {
     const stack = document.getElementById('toastStack');
-    if(!stack) return;
+    if (!stack) return;
     const toast = document.createElement('div');
     toast.className = 'toast';
     toast.innerHTML = `
@@ -47,7 +47,7 @@ function showToast(title, body, color = '#a855f7'){
             <div class="toast-body">${body}</div>
         </div>`;
     stack.appendChild(toast);
-    while(stack.children.length > 4) stack.removeChild(stack.firstChild);
+    while (stack.children.length > 4) stack.removeChild(stack.firstChild);
     setTimeout(() => {
         toast.classList.add('toast-out');
         toast.addEventListener('animationend', () => toast.remove(), { once: true });
@@ -56,56 +56,43 @@ function showToast(title, body, color = '#a855f7'){
 
 /* ================= ATTACK FORECAST TREE ENGINE ================= */
 const TREE_DATA = [
-    { id:0,  parent:null, name:"Suspicious Network Activity", prob:100, conf:96, desc:"Anomalous behaviour deviating from baseline network traffic patterns." },
-
+    { id:0,  parent:null, name:"Suspicious Network Activity", prob:100, conf:98, desc:"Anomalous behaviour deviating from baseline network traffic patterns." },
     { id:1,  parent:0, name:"Initial Access",       prob:64, conf:82, desc:"Adversary attempts to gain an initial foothold into the network." },
     { id:2,  parent:0, name:"Discovery",             prob:23, desc:"Attacker enumerates internal hosts, services and network topology." },
     { id:3,  parent:0, name:"Credential Access",     prob:13, desc:"Attempt to steal account credentials for further access." },
-
     { id:4,  parent:1, name:"Execution",             prob:71, desc:"Malicious code is executed on the compromised host." },
     { id:5,  parent:1, name:"Persistence",           prob:29, desc:"Attacker maintains footholds across system restarts or credential changes." },
-
     { id:6,  parent:2, name:"Lateral Movement",      prob:55, desc:"Pivoting to other hosts using discovered network information." },
     { id:7,  parent:2, name:"Collection",            prob:45, desc:"Gathering data of interest from discovered internal sources." },
-
     { id:8,  parent:3, name:"Privilege Escalation",  prob:67, desc:"Using stolen credentials to gain higher-level permissions." },
     { id:9,  parent:3, name:"Lateral Movement",      prob:33, desc:"Moving across the network using compromised credentials." },
-
     { id:10, parent:4, name:"Privilege Escalation",  prob:58, desc:"Exploiting executed code context to gain elevated privileges." },
     { id:11, parent:4, name:"Defense Evasion",       prob:42, desc:"Techniques used to avoid detection during execution." },
-
     { id:12, parent:5, name:"Defense Evasion",       prob:50, desc:"Hiding persistence mechanisms from security tooling." },
     { id:13, parent:5, name:"Credential Access",     prob:50, desc:"Harvesting credentials from the persistent foothold." },
-
     { id:14, parent:6, name:"Command and Control",   prob:62, desc:"Establishing outbound channel for remote operator control." },
     { id:15, parent:6, name:"Exfiltration",          prob:38, desc:"Extracting collected data from the compromised host directly." },
-
     { id:16, parent:7, name:"Exfiltration",          prob:80, desc:"Bulk transfer of collected sensitive data out of the network." },
-
     { id:17, parent:8, name:"Lateral Movement",      prob:70, desc:"Elevated access used to pivot deeper into the network." },
     { id:18, parent:8, name:"Defense Evasion",       prob:30, desc:"Elevated privileges used to disable security controls." },
-
     { id:19, parent:9, name:"Command and Control",   prob:55, desc:"Compromised host establishes covert C2 communication." },
     { id:20, parent:9, name:"Exfiltration",          prob:45, desc:"Sensitive data extracted using existing lateral access." },
-
     { id:21, parent:10, name:"Credential Access",    prob:64, desc:"Privileged access leveraged to dump further credentials." },
     { id:22, parent:10, name:"Lateral Movement",     prob:36, desc:"Escalated privileges enable movement to critical systems." },
-
     { id:23, parent:14, name:"Exfiltration",         prob:75, desc:"Data is exfiltrated through the established C2 channel." },
     { id:24, parent:14, name:"Impact",               prob:25, desc:"Operator uses C2 access to disrupt or destroy systems/data." },
-
     { id:25, parent:17, name:"Command and Control",  prob:58, desc:"Newly reached host establishes a secondary C2 channel." },
     { id:26, parent:17, name:"Collection",           prob:42, desc:"Sensitive data gathered from newly accessed internal systems." },
 ];
 
 const BOX_W = 200, BOX_H = 62, COL_GAP = 92, ROW_HEIGHT = 76, PAD = 40;
 
-function buildTreeAndRender(){
+function buildTreeAndRender() {
     const nodeMap = {};
     TREE_DATA.forEach(n => nodeMap[n.id] = { ...n, children: [] });
     const childrenOf = {};
     TREE_DATA.forEach(n => {
-        if(n.parent !== null){
+        if (n.parent !== null) {
             childrenOf[n.parent] = childrenOf[n.parent] || [];
             childrenOf[n.parent].push(nodeMap[n.id]);
             nodeMap[n.parent].children.push(nodeMap[n.id]);
@@ -113,16 +100,14 @@ function buildTreeAndRender(){
     });
     const root = nodeMap[0];
 
-    // Assign depth (BFS)
-    (function assignDepth(node, depth){
+    (function assignDepth(node, depth) {
         node.depth = depth;
-        node.children.forEach(c => assignDepth(c, depth+1));
+        node.children.forEach(c => assignDepth(c, depth + 1));
     })(root, 0);
 
-    // Assign row via recursive centering
     let leafCounter = 0;
-    (function assignRow(node){
-        if(node.children.length === 0){
+    (function assignRow(node) {
+        if (node.children.length === 0) {
             node.row = leafCounter;
             leafCounter += 1;
         } else {
@@ -132,49 +117,48 @@ function buildTreeAndRender(){
         }
     })(root);
 
-    // Mark top-probability branch at every fork
     Object.values(childrenOf).forEach(childArr => {
         let top = childArr[0];
-        childArr.forEach(c => { if(c.prob > top.prob) top = c; });
+        childArr.forEach(c => { if (c.prob > top.prob) top = c; });
         top.isTop = true;
     });
 
-    // Compute pixel positions
     const flat = Object.values(nodeMap);
     let maxDepth = 0, maxRow = 0;
     flat.forEach(n => {
         n.x = PAD + n.depth * (BOX_W + COL_GAP);
         n.y = PAD + n.row * ROW_HEIGHT;
-        if(n.depth > maxDepth) maxDepth = n.depth;
-        if(n.row > maxRow) maxRow = n.row;
+        if (n.depth > maxDepth) maxDepth = n.depth;
+        if (n.row > maxRow) maxRow = n.row;
     });
 
-    const contentW = PAD*2 + BOX_W + maxDepth*(BOX_W+COL_GAP);
-    const contentH = PAD*2 + BOX_H + maxRow*ROW_HEIGHT;
+    const contentW = PAD * 2 + BOX_W + maxDepth * (BOX_W + COL_GAP);
+    const contentH = PAD * 2 + BOX_H + maxRow * ROW_HEIGHT;
 
     const canvas = document.getElementById('forecastTreeCanvas');
     const svg = document.getElementById('forecastTreeSvg');
+    if (!canvas || !svg) return;
+    
     canvas.style.width = contentW + 'px';
     canvas.style.height = contentH + 'px';
     svg.setAttribute('width', contentW);
     svg.setAttribute('height', contentH);
 
-    // Draw connector lines first (so boxes render on top)
     flat.forEach(n => {
-        if(n.parent === null) return;
+        if (n.parent === null) return;
         const p = nodeMap[n.parent];
-        const x1 = p.x + BOX_W, y1 = p.y + BOX_H/2;
-        const x2 = n.x, y2 = n.y + BOX_H/2;
-        const midX = x1 + (x2-x1)/2;
+        const x1 = p.x + BOX_W, y1 = p.y + BOX_H / 2;
+        const x2 = n.x, y2 = n.y + BOX_H / 2;
+        const midX = x1 + (x2 - x1) / 2;
         const d = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
 
-        const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', d);
         path.setAttribute('fill', 'none');
         path.setAttribute('class', 'tree-line');
         path.dataset.child = n.id;
 
-        if(n.isTop){
+        if (n.isTop) {
             path.setAttribute('stroke', 'rgba(129, 140, 248,0.55)');
             path.setAttribute('stroke-width', '2.4');
         } else {
@@ -184,7 +168,6 @@ function buildTreeAndRender(){
         svg.appendChild(path);
     });
 
-    // Draw boxes
     flat.forEach(n => {
         const box = document.createElement('div');
         box.className = 'tree-box';
@@ -194,14 +177,14 @@ function buildTreeAndRender(){
         box.style.height = BOX_H + 'px';
         box.dataset.id = n.id;
 
-        if(n.parent === null) box.classList.add('tree-box-root');
-        else if(n.isTop) box.classList.add('tree-box-top');
+        if (n.parent === null) box.classList.add('tree-box-root');
+        else if (n.isTop) box.classList.add('tree-box-top');
 
         let inner = '';
-        if(n.parent === null) inner += `<div class="root-pill">Current State</div>`;
+        if (n.parent === null) inner += `<div class="root-pill">Current State</div>`;
         inner += `<div class="stage-name">${n.name}</div>`;
         inner += `<div class="stage-prob">Probability: ${n.prob}%</div>`;
-        if(n.conf) inner += `<div class="stage-conf">Confidence: ${n.conf}%</div>`;
+        if (n.conf) inner += `<div class="stage-conf">Confidence: ${n.conf}%</div>`;
         box.innerHTML = inner;
 
         box.addEventListener('mouseenter', () => highlightPath(n.id, nodeMap));
@@ -211,10 +194,10 @@ function buildTreeAndRender(){
     });
 }
 
-function highlightPath(id, nodeMap){
+function highlightPath(id, nodeMap) {
     const ancestors = new Set();
     let cur = nodeMap[id];
-    while(cur){
+    while (cur) {
         ancestors.add(cur.id);
         cur = cur.parent !== null ? nodeMap[cur.parent] : null;
     }
@@ -236,67 +219,57 @@ function highlightPath(id, nodeMap){
         `<span style="color:#c084fc; font-weight:700;">${node.name}</span> — Probability: <span style="color:#818cf8; font-weight:700;">${node.prob}%</span>${node.conf ? ` · Confidence: <span style="color:#818cf8;">${node.conf}%</span>` : ''} <br><span style="color:#948ba8;">${node.desc}</span>`;
 }
 
-function clearHighlight(){
-    document.querySelectorAll('.tree-box').forEach(b => { b.classList.remove('highlight','dim'); });
-    document.querySelectorAll('.tree-line').forEach(l => { l.classList.remove('highlight','dim'); });
+function clearHighlight() {
+    document.querySelectorAll('.tree-box').forEach(b => { b.classList.remove('highlight', 'dim'); });
+    document.querySelectorAll('.tree-line').forEach(l => { l.classList.remove('highlight', 'dim'); });
     document.getElementById('treeInfoText').textContent = 'Hover over any predicted state above to trace its attack path and view details.';
 }
 
-/* ================= REST OF DASHBOARD ================= */
-const ATTACK_CHAIN = [
-    { id:0, name:"Reconnaissance", fullName:"Network Reconnaissance", risk:22, prob:0, conf:0, next:null,
-      mitreTactic:"Reconnaissance",
-      description:"Passive network enumeration detected", events:["🔍 Port scanning detected","📡 DNS probing activity"],
-      alert:"Monitoring reconnaissance phase", anomaly:0.15 },
+/* ================= LIVE DASHBOARD & WEBSOCKET ================= */
+let STATE = {
+    event: "Detected: Benign",
+    risk: 0,
+    next_attack: "Benign",
+    mitre: "Reconnaissance / Normal",
+    confidence: 0,
+    top_triggers: [],
+    flows: 0,
+    packets: 0,
+    anomaly: 0,
+    status: "MONITORING",
+    trafficHistory: []
+};
 
-    { id:1, name:"Network Scan", fullName:"Active Scanning & Probing", risk:38, prob:0.45, conf:0, next:"Initial Access",
-      mitreTactic:"Reconnaissance",
-      description:"Intensified network scanning detected", events:["🎯 Multiple port connections","⚠️ Service fingerprinting"],
-      alert:"Escalating reconnaissance activity", anomaly:0.38 },
-
-    { id:2, name:"Initial Access", fullName:"Exploitation & Access Gained", risk:55, prob:0.60, conf:0.72, next:"Lateral Movement",
-      mitreTactic:"Initial Access",
-      description:"System compromise confirmed", events:["🔓 Unauthorized access","💥 Payload execution"],
-      alert:"CRITICAL: Initial access compromised", anomaly:0.55 },
-
-    { id:3, name:"Lateral Movement", fullName:"Internal System Propagation", risk:68, prob:0.72, conf:0.81, next:"Command and Control",
-      mitreTactic:"Lateral Movement",
-      description:"Lateral movement in progress", events:["🔀 Internal lateral connections","👤 Privilege escalation attempt"],
-      alert:"ALERT: Attacker spreading through network", anomaly:0.68 },
-
-    { id:4, name:"Command & Control", fullName:"Malicious C2 Communication", risk:78, prob:0.78, conf:0.89, next:"Data Exfiltration",
-      mitreTactic:"Command and Control",
-      description:"C2 communication established", events:["📤 Suspicious outbound traffic","🎯 C2 beacon detected"],
-      alert:"CRITICAL: C2 communication confirmed", anomaly:0.78 },
-
-    { id:5, name:"Data Exfiltration", fullName:"Sensitive Data Extraction", risk:74, prob:0.61, conf:0.75, next:null,
-      mitreTactic:"Exfiltration",
-      description:"Data breach in progress", events:["🗂️ Database query surge","📦 Large data transfer"],
-      alert:"CRITICAL: Data exfiltration underway", anomaly:0.74 },
-];
-
-let STATE = { step:0, flows:0, packets:0, risk:0, anomaly:0, trafficHistory:[] };
 for (let i = 0; i < 20; i++) {
-    STATE.trafficHistory.push({ incoming: 2100 + Math.random()*100, outgoing: 1600 + Math.random()*100 });
+    STATE.trafficHistory.push({ flows: 10 + i, packets: 50 + i * 2 });
 }
-let CHARTS = {};
-const rand = (min,max) => Math.random()*(max-min)+min;
-const formatTime = () => new Date().toLocaleTimeString("en-US",{hour12:false});
 
-function initCharts(){
+let CHARTS = {};
+const rand = (min, max) => Math.random() * (max - min) + min;
+const formatTime = () => new Date().toLocaleTimeString("en-US", { hour12: false });
+
+function initCharts() {
     const ctx = document.getElementById('trafficReportChart');
-    if(!ctx) return;
+    if (!ctx) return;
     CHARTS.traffic = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: STATE.trafficHistory.map((_,i)=>i),
+            labels: STATE.trafficHistory.map((_, i) => i),
             datasets: [
-                { label: 'Incoming Traffic', data: STATE.trafficHistory.map(d=>d.incoming),
-                  borderColor: '#818cf8', backgroundColor: 'rgba(129, 140, 248, 0.10)',
-                  tension: 0.4, fill: true, pointRadius: 0, borderWidth: 2.5 },
-                { label: 'Outgoing Traffic', data: STATE.trafficHistory.map(d=>d.outgoing),
-                  borderColor: '#a855f7', backgroundColor: 'rgba(168, 85, 247, 0.10)',
-                  tension: 0.4, fill: true, pointRadius: 0, borderWidth: 2.5 }
+                {
+                    label: 'Flows/Sec',
+                    data: STATE.trafficHistory.map(d => d.flows),
+                    borderColor: '#818cf8',
+                    backgroundColor: 'rgba(129, 140, 248, 0.10)',
+                    tension: 0.4, fill: true, pointRadius: 0, borderWidth: 2.5
+                },
+                {
+                    label: 'Packets/Sec',
+                    data: STATE.trafficHistory.map(d => d.packets),
+                    borderColor: '#a855f7',
+                    backgroundColor: 'rgba(168, 85, 247, 0.10)',
+                    tension: 0.4, fill: true, pointRadius: 0, borderWidth: 2.5
+                }
             ]
         },
         options: {
@@ -311,76 +284,92 @@ function initCharts(){
                 }
             },
             scales: {
-                y: { beginAtZero: false, grid: { color: 'rgba(168,85,247,0.08)' },
-                     ticks: { color: '#948ba8', font: { family:'Rajdhani' } } },
-                x: { grid: { display: false },
-                     ticks: { color: '#948ba8', font: { family:'Rajdhani' } } }
+                y: { beginAtZero: true, grid: { color: 'rgba(168,85,247,0.08)' }, ticks: { color: '#948ba8', font: { family: 'Rajdhani' } } },
+                x: { grid: { display: false }, ticks: { color: '#948ba8', font: { family: 'Rajdhani' } } }
             }
         }
     });
 }
 
-function updateTrafficChart(){
-    if(!CHARTS.traffic) return;
-    CHARTS.traffic.data.labels = STATE.trafficHistory.map((_,i)=>i);
-    CHARTS.traffic.data.datasets[0].data = STATE.trafficHistory.map(d=>d.incoming);
-    CHARTS.traffic.data.datasets[1].data = STATE.trafficHistory.map(d=>d.outgoing);
+function updateTrafficChart() {
+    if (!CHARTS.traffic) return;
+    CHARTS.traffic.data.labels = STATE.trafficHistory.map((_, i) => i);
+    CHARTS.traffic.data.datasets[0].data = STATE.trafficHistory.map(d => d.flows);
+    CHARTS.traffic.data.datasets[1].data = STATE.trafficHistory.map(d => d.packets);
     CHARTS.traffic.update('none');
 }
 
-function updateUI(){
-    const stage = ATTACK_CHAIN[Math.min(STATE.step, ATTACK_CHAIN.length-1)];
+function updateUI() {
+    animateValue(document.getElementById("flowsPerSec"), STATE.flows, { duration: 400 });
+    animateValue(document.getElementById("packetsPerSec"), STATE.packets, { duration: 400 });
 
-    animateValue(document.getElementById("flowsPerSec"), STATE.flows, { duration: 650 });
-    animateValue(document.getElementById("packetsPerSec"), STATE.packets, { duration: 650 });
-
-    animateValue(document.getElementById("eventCount"), Math.round(STATE.risk*0.3), { duration: 400 });
+    // Triggers / Events list
+    const triggers = STATE.top_triggers || [];
+    animateValue(document.getElementById("eventCount"), triggers.length, { duration: 300 });
     let eventHTML = "";
-    if(stage.events?.length){
-        stage.events.forEach((evt,idx)=>{
-            const color = idx===0 ? "#fb7185" : "#fbbf24";
-            eventHTML += `<div class="slide-up text-xs flex justify-between gap-2 font-semibold" style="color:${color}"><span>${evt}</span><span class="mono-num text-purple-300/30" style="font-size:10px;">${formatTime()}</span></div>`;
+    if (triggers.length > 0) {
+        triggers.forEach((trig, idx) => {
+            const color = idx === 0 ? "#fb7185" : "#fbbf24";
+            eventHTML += `<div class="slide-up text-xs flex justify-between gap-2 font-semibold" style="color:${color}">
+                <span>${trig}</span>
+                <span class="mono-num text-purple-300/30" style="font-size:10px;">${formatTime()}</span>
+            </div>`;
         });
-    }
-    document.getElementById("eventsList").innerHTML = eventHTML || '<div class="text-xs text-purple-300/40">✓ No incoming anomalies</div>';
-
-    let status, statusColor, statusDesc, glowClass, threatLabel;
-    if(STATE.risk < 40){
-        status="NORMAL"; statusColor="#34d399"; statusDesc="✓ All systems operating normally";
-        glowClass="glow-green"; threatLabel="LOW";
-    } else if(STATE.risk <= 70){
-        status="AT RISK"; statusColor="#fbbf24"; statusDesc="⚠ Suspicious activity — heightened alert";
-        glowClass="glow-amber"; threatLabel="MEDIUM";
     } else {
-        status="UNDER ATTACK"; statusColor="#fb7185"; statusDesc="🚨 CRITICAL threat — immediate action needed";
-        glowClass="glow-red"; threatLabel="CRITICAL";
+        eventHTML = `<div class="text-xs text-purple-300/40">✓ ${STATE.event || "Monitoring normal traffic"}</div>`;
+    }
+    document.getElementById("eventsList").innerHTML = eventHTML;
+
+    // Status Card & Threat Level
+    let status = STATE.status || "MONITORING";
+    let statusColor, glowClass, threatLabel;
+    
+    if (STATE.risk < 35) {
+        statusColor = "#34d399"; glowClass = "glow-green"; threatLabel = "LOW";
+    } else if (STATE.risk <= 70) {
+        statusColor = "#fbbf24"; glowClass = "glow-amber"; threatLabel = "MEDIUM";
+    } else {
+        statusColor = "#fb7185"; glowClass = "glow-red"; threatLabel = "HIGH";
     }
 
-    document.getElementById("statusIndicator").style.background = statusColor;
-    document.getElementById("statusIndicator").style.boxShadow = `0 0 10px ${statusColor}`;
-    const statusLabelEl = document.getElementById("statusLabel");
-    statusLabelEl.style.color = statusColor;
-    if(statusLabelEl.textContent !== status){
-        statusLabelEl.textContent = status;
-        flashValue(statusLabelEl);
+    const indicator = document.getElementById("statusIndicator");
+    if (indicator) {
+        indicator.style.background = statusColor;
+        indicator.style.boxShadow = `0 0 10px ${statusColor}`;
     }
-    document.getElementById("statusDesc").textContent = statusDesc;
-    animateValue(document.getElementById("riskScoreVal"), Math.round(STATE.risk), { duration: 500 });
+
+    const statusLabelEl = document.getElementById("statusLabel");
+    if (statusLabelEl) {
+        statusLabelEl.style.color = statusColor;
+        if (statusLabelEl.textContent !== status) {
+            statusLabelEl.textContent = status;
+            flashValue(statusLabelEl);
+        }
+    }
+
+    const descEl = document.getElementById("statusDesc");
+    if (descEl) descEl.textContent = STATE.event || "All systems operating normally";
+
+    animateValue(document.getElementById("riskScoreVal"), Math.round(STATE.risk), { duration: 400 });
 
     const statusCard = document.getElementById("statusCardGlow");
-    statusCard.classList.remove("glow-green","glow-amber","glow-red");
-    statusCard.classList.add(glowClass);
+    if (statusCard) {
+        statusCard.classList.remove("glow-green", "glow-amber", "glow-red");
+        statusCard.classList.add(glowClass);
+    }
 
     const threatLabelEl = document.getElementById("threatLevelLabel");
-    if(threatLabelEl.textContent !== threatLabel){
-        threatLabelEl.textContent = threatLabel;
-        flashValue(threatLabelEl);
+    if (threatLabelEl) {
+        if (threatLabelEl.textContent !== threatLabel) {
+            threatLabelEl.textContent = threatLabel;
+            flashValue(threatLabelEl);
+        }
+        threatLabelEl.style.color = statusColor;
     }
-    threatLabelEl.style.color = statusColor;
+
     const litCount = Math.min(5, Math.max(1, Math.ceil(STATE.risk / 20)));
-    const segments = document.querySelectorAll("#threatSegments .segment");
-    segments.forEach((seg, i)=>{
-        if(i < litCount){
+    document.querySelectorAll("#threatSegments .segment").forEach((seg, i) => {
+        if (i < litCount) {
             seg.style.background = statusColor;
             seg.style.borderColor = statusColor;
         } else {
@@ -388,76 +377,71 @@ function updateUI(){
             seg.style.borderColor = "rgba(168,85,247,0.15)";
         }
     });
-    document.getElementById("confidence").textContent = stage.conf ? (stage.conf*100).toFixed(0)+"%" : "—";
 
-    document.getElementById("currentStage").textContent = stage.fullName;
-    document.getElementById("stageDescription").textContent = stage.description;
-    document.getElementById("predictedStage").textContent = stage.next || "—";
-    document.getElementById("predictedTime").textContent = stage.next ? `${Math.round(stage.prob*100)}% likely` : "—";
-
-    if(stage.next && stage.prob > 0){
-        document.getElementById("probabilitySection").style.display = "block";
-        animateValue(document.getElementById("probValue"), Math.round(stage.prob*100), { suffix: "%", duration: 500 });
-        animateValue(document.getElementById("probPercentage"), Math.round(stage.prob*100), { suffix: "%", duration: 500 });
-        document.getElementById("probBar").style.width = (stage.prob*100)+"%";
-    } else {
-        document.getElementById("probabilitySection").style.display = "none";
+    // Confidence
+    const confVal = (STATE.confidence || 0).toFixed(1) + "%";
+    document.getElementById("confidence").textContent = confVal;
+    document.getElementById("detectionConf").textContent = confVal;
+    if (document.getElementById("heroAccuracy")) {
+        document.getElementById("heroAccuracy").textContent = confVal;
     }
 
-    document.getElementById("forecastAlert").style.display = stage.next ? "block" : "none";
-    document.getElementById("forecastText").textContent = stage.alert;
+    // Prediction Box Mapping
+    const rawEvent = (STATE.event || "").replace("Detected: ", "");
+    document.getElementById("currentStage").textContent = rawEvent || "Benign";
+    document.getElementById("predictedStage").textContent = STATE.next_attack || "Benign";
+    
+    const probPct = Math.round(STATE.confidence || 0);
+    animateValue(document.getElementById("probValue"), probPct, { suffix: "%", duration: 400 });
+    animateValue(document.getElementById("probPercentage"), probPct, { suffix: "%", duration: 400 });
+    document.getElementById("probBar").style.width = probPct + "%";
+    document.getElementById("predictedTime").textContent = `${probPct}% likely`;
 
-    document.querySelectorAll("#mitreTableBody tr").forEach(row=>{
-        row.classList.toggle("active-row", row.dataset.tactic === stage.mitreTactic);
+    document.getElementById("forecastText").textContent = `Mitre Tactic: ${STATE.mitre || "Reconnaissance"} — Threat Level: ${threatLabel}`;
+
+    // Quick Stats & MITRE
+    animateValue(document.getElementById("anomalyScore"), STATE.anomaly || 0, { decimals: 1, duration: 400 });
+    document.getElementById("mitreActiveStage").textContent = STATE.mitre || "Reconnaissance";
+    document.getElementById("lastUpdate").textContent = formatTime();
+
+    // Highlight MITRE Table Row
+    const activeMitre = (STATE.mitre || "").toLowerCase();
+    document.querySelectorAll("#mitreTableBody tr").forEach(row => {
+        const tactic = (row.dataset.tactic || "").toLowerCase();
+        row.classList.toggle("active-row", activeMitre.includes(tactic));
     });
 
-    animateValue(document.getElementById("anomalyScore"), STATE.anomaly*10, { decimals: 1, duration: 500 });
-    animateValue(document.getElementById("detectionConf"), stage.conf ? Math.round(stage.conf*100) : 0, { duration: 500 });
-    document.getElementById("stageProgress").textContent = `${STATE.step+1}/${ATTACK_CHAIN.length}`;
-    document.getElementById("lastUpdate").textContent = formatTime();
+    // Animate mini bars
+    for (let i = 0; i < 5; i++) {
+        const bar = document.getElementById(`bar${i}`);
+        if (bar) {
+            const h = Math.min(95, Math.max(15, (STATE.packets / 2) + rand(-10, 10)));
+            bar.style.height = h + "%";
+        }
+    }
 
     updateTrafficChart();
 }
 
-function applyLiveNetworkData(data){
-    STATE.flows = Number(data.flows ?? data.active_connections ?? 0);
-    STATE.packets = Number(data.packets ?? 0);
+function applyLiveNetworkData(data) {
+    STATE.event = data.event ?? "Detected: Benign";
     STATE.risk = Number(data.risk ?? 0);
+    STATE.next_attack = data.next_attack ?? "Benign";
+    STATE.mitre = data.mitre ?? "Reconnaissance";
+    STATE.confidence = Number(data.confidence ?? 0);
+    STATE.top_triggers = data.top_triggers ?? [];
+    STATE.flows = Number(data.flows ?? 0);
+    STATE.packets = Number(data.packets ?? 0);
     STATE.anomaly = Number(data.anomaly ?? 0);
+    STATE.status = data.status ?? "MONITORING";
 
-    const incoming = Number(data.incoming_packets ?? 0);
-    const outgoing = Number(data.outgoing_packets ?? 0);
-
-    STATE.trafficHistory.push({
-        incoming,
-        outgoing
-    });
-
-    if(STATE.trafficHistory.length > 24) STATE.trafficHistory.shift();
-
-    const sourceEl = document.getElementById("trafficSource");
-    if(sourceEl) sourceEl.textContent = data.source === "pyshark_live_capture" ? "LIVE • TSHARK" : "LIVE • SYSTEM";
-
-    if(data.next_attack){
-        const stageIndex = ATTACK_CHAIN.findIndex(stage =>
-            stage.name.toLowerCase() === String(data.next_attack).toLowerCase() ||
-            String(stage.next || "").toLowerCase() === String(data.next_attack).toLowerCase()
-        );
-        if(stageIndex >= 0) STATE.step = stageIndex;
-    }
-
-    for(let i = 0; i < 5; i++){
-        const bar = document.getElementById(`bar${i}`);
-        if(bar){
-            const value = Math.min(95, 15 + Math.log10(Math.max(1, STATE.packets)) * 15 + rand(-5,5));
-            bar.style.height = Math.max(15, value) + "%";
-        }
-    }
+    STATE.trafficHistory.push({ flows: STATE.flows, packets: STATE.packets });
+    if (STATE.trafficHistory.length > 20) STATE.trafficHistory.shift();
 
     updateUI();
 }
 
-function connectNetForeSightWebSocket(){
+function connectNetForeSightWebSocket() {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const host = window.location.hostname || "127.0.0.1";
     const socket = new WebSocket(`${protocol}://${host}:8000/ws/alerts`);
@@ -466,21 +450,27 @@ function connectNetForeSightWebSocket(){
 
     socket.addEventListener("open", () => {
         const sourceEl = document.getElementById("trafficSource");
-        if(sourceEl) sourceEl.textContent = "CONNECTING • LIVE";
+        if (sourceEl) sourceEl.textContent = "LIVE MONITORING";
+        const dot = document.getElementById("wsStatusDot");
+        if (dot) dot.style.background = "#34d399";
     });
 
     socket.addEventListener("message", event => {
         try {
             const data = JSON.parse(event.data);
-            if(data.type === "network_update") applyLiveNetworkData(data);
-        } catch(error) {
-            console.error("Invalid NetForeSight WebSocket message:", error);
+            if (data.type === "network_update") {
+                applyLiveNetworkData(data);
+            }
+        } catch (error) {
+            console.error("Invalid WebSocket payload:", error);
         }
     });
 
     socket.addEventListener("close", () => {
         const sourceEl = document.getElementById("trafficSource");
-        if(sourceEl) sourceEl.textContent = "BACKEND OFFLINE";
+        if (sourceEl) sourceEl.textContent = "BACKEND OFFLINE";
+        const dot = document.getElementById("wsStatusDot");
+        if (dot) dot.style.background = "#fb7185";
         setTimeout(connectNetForeSightWebSocket, 2000);
     });
 
@@ -493,15 +483,15 @@ updateUI();
 connectNetForeSightWebSocket();
 
 /* ================= NAV SCROLLSPY ================= */
-(function initScrollspy(){
+(function initScrollspy() {
     const targets = [
         { observeId: "dashboardAnchor", href: "#dashboard" },
-        { observeId: "prediction",      href: "#prediction" },
-        { observeId: "mitre",           href: "#mitre" },
-        { observeId: "traffic-report",  href: "#traffic-report" },
+        { observeId: "prediction", href: "#prediction" },
+        { observeId: "mitre", href: "#mitre" },
+        { observeId: "traffic-report", href: "#traffic-report" },
     ];
     const navLinks = Array.from(document.querySelectorAll('nav a.nav-link'));
-    if(!navLinks.length) return;
+    if (!navLinks.length) return;
 
     const setActive = (href) => {
         navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === href));
@@ -509,31 +499,31 @@ connectNetForeSightWebSocket();
 
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
-            if(entry.isIntersecting){
+            if (entry.isIntersecting) {
                 const match = targets.find(t => t.observeId === entry.target.id);
-                if(match) setActive(match.href);
+                if (match) setActive(match.href);
             }
         });
     }, { rootMargin: "-45% 0px -50% 0px", threshold: 0 });
 
     targets.forEach(t => {
         const el = document.getElementById(t.observeId);
-        if(el) observer.observe(el);
+        if (el) observer.observe(el);
     });
 })();
 
 /* ================= HEADER SHRINK ON SCROLL ================= */
-(function initHeaderShrink(){
+(function initHeaderShrink() {
     const header = document.querySelector('header.site-header');
-    if(!header) return;
+    if (!header) return;
     const onScroll = () => header.classList.toggle('scrolled', window.scrollY > 24);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
 })();
 
-/* ================= STAGGERED REVEAL ON SCROLL ================= */
-(function initScrollReveal(){
-    if(prefersReducedMotion) return;
+/* ================= STAGGERED REVEAL ================= */
+(function initScrollReveal() {
+    if (prefersReducedMotion) return;
     const groups = document.querySelectorAll('main > .grid, #prediction');
     groups.forEach(group => {
         Array.from(group.children).forEach((child, i) => {
@@ -546,7 +536,7 @@ connectNetForeSightWebSocket();
 
     const revealObserver = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
-            if(entry.isIntersecting){
+            if (entry.isIntersecting) {
                 entry.target.classList.add('revealed');
                 revealObserver.unobserve(entry.target);
             }
