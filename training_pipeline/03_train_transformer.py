@@ -1,67 +1,76 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
-import numpy as np
 import joblib
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.model_selection import train_test_split
 
-print("--- BOOTING TRANSFORMER TRAINING ---")
-X_seq = np.load('training_pipeline/X_seq.npy')
-y_next = np.load('training_pipeline/y_next.npy')
-encoder = joblib.load('training_pipeline/label_encoder.pkl')
+print("[*] Training PyTorch Transformer...")
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
+# 1. LOAD PREPROCESSED DATA & METADATA
+X_seq_train = np.load("training_pipeline/tmp/X_seq_train.npy")
+y_seq_train = np.load("training_pipeline/tmp/y_seq_train.npy")
+label_encoder = joblib.load("backend/label_encoder.pkl")
 
-X_train, X_test, y_train, y_test = train_test_split(X_seq, y_next, test_size=0.2, random_state=42)
+train_dataset = TensorDataset(
+    torch.tensor(X_seq_train, dtype=torch.float32), 
+    torch.tensor(y_seq_train, dtype=torch.long)
+)
 
-# FIXING THE CLASS IMBALANCE: Brutally weight the minority attack classes
-weights = compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
-class_weights = torch.tensor(weights, dtype=torch.float32).to(device)
-print(f"Applied Class Weights to stop Benign spam: {weights}")
+# num_workers=0 avoids Windows MINGW multiprocessing crashes
+train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=0) 
 
-train_loader = DataLoader(TensorDataset(torch.tensor(X_train), torch.tensor(y_train)), batch_size=256, shuffle=True)
-
-class NextStageTransformer(nn.Module):
-    def __init__(self, input_dim, num_classes, d_model=64, nhead=4, num_layers=2):
-        super().__init__()
-        self.embedding = nn.Linear(input_dim, d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
+# 2. TRANSFORMER ARCHITECTURE (Matching main.py exactly)
+class AttackForecasterTransformer(nn.Module):
+    def __init__(self, feature_dim=16, seq_len=5, num_classes=len(label_encoder.classes_), d_model=64, nhead=4, num_layers=2):
+        super(AttackForecasterTransformer, self).__init__()
+        self.embedding = nn.Linear(feature_dim, d_model)
+        
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=128, batch_first=True
+        )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.fc = nn.Linear(d_model, num_classes)
+        
+        self.fc = nn.Sequential(
+            nn.Linear(d_model * seq_len, 64),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(64, num_classes)
+        )
         
     def forward(self, x):
         x = self.embedding(x)
         x = self.transformer(x)
-        # Grab the output of the last sequence step
-        out = self.fc(x[:, -1, :])
-        return out
+        x = x.reshape(x.size(0), -1)
+        return self.fc(x)
 
-input_dim = X_seq.shape[2]
-num_classes = len(encoder.classes_)
+# 3. INITIALIZE MODEL, OPTIMIZER & SCHEDULER
+device = torch.device("cpu")
+transformer_model = AttackForecasterTransformer().to(device)
 
-model = NextStageTransformer(input_dim=input_dim, num_classes=num_classes).to(device)
-criterion = nn.CrossEntropyLoss(weight=class_weights) # <--- THIS FIXES THE LAZY BENIGN PREDICTIONS
-optimizer = optim.AdamW(model.parameters(), lr=0.001)
+EPOCHS = 25
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.AdamW(transformer_model.parameters(), lr=0.001, weight_decay=0.01)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
-epochs = 15
-print("Training Transformer...")
-for epoch in range(epochs):
-    model.train()
+print(f"[*] Starting training for {EPOCHS} epochs overnight...")
+transformer_model.train()
+
+# 4. OVERNIGHT TRAINING LOOP
+for epoch in range(EPOCHS):
     total_loss = 0
-    for batch_X, batch_y in train_loader:
-        batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-        
+    for batch_x, batch_y in train_loader:
         optimizer.zero_grad()
-        outputs = model(batch_X)
+        outputs = transformer_model(batch_x)
         loss = criterion(outputs, batch_y)
         loss.backward()
         optimizer.step()
-        
         total_loss += loss.item()
-    print(f"Epoch {epoch+1}/{epochs} | Loss: {total_loss/len(train_loader):.4f}")
+    
+    scheduler.step()
+    avg_loss = total_loss / len(train_loader)
+    current_lr = scheduler.get_last_lr()[0]
+    print(f"    Epoch {epoch+1:02d}/{EPOCHS} - Loss: {avg_loss:.5f} - LR: {current_lr:.6f}")
 
-torch.save(model.state_dict(), 'transformer_forecaster.pt')
-print("Saved transformer_forecaster.pt. You're done.")
+# 5. DEPLOY WEIGHTS DIRECTLY TO BACKEND
+torch.save(transformer_model.state_dict(), "backend/transformer_forecaster.pt")
+print("[+] Transformer Complete. Model trained and deployed to backend/transformer_forecaster.pt.")

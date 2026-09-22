@@ -1,70 +1,57 @@
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 import os
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
 
-print("--- BOOTING PREPROCESSING ---")
+# Strict 16 feature enforcement
+FEATURE_NAMES = [
+    "Dst Port", "Protocol", "Flow Duration", "Tot Fwd Pkts", 
+    "Tot Bwd Pkts", "TotLen Fwd Pkts", "TotLen Bwd Pkts",
+    "Fwd Pkt Len Max", "Fwd Pkt Len Min", "Flow Byts/s", "Flow Pkts/s",
+    "Flow IAT Mean", "Flow IAT Std", "SYN Flag Cnt", "RST Flag Cnt", "ACK Flag Cnt"
+]
 
-# Forward slashes prevent Windows backslash escape errors
-data_path = 'data/cic.csv'
-if not os.path.exists(data_path):
-    data_path = '../data/cic.csv'
+print("[*] Running Data Prep...")
+# CHANGE THIS IF YOUR CSV IS NAMED DIFFERENTLY
+df = pd.read_csv("data/cic.csv") 
 
-if not os.path.exists(data_path):
-    raise FileNotFoundError(f"Can't find {data_path}. Check your path, bro.")
+df.replace([np.inf, -np.inf], np.nan, inplace=True)
+df.dropna(inplace=True)
 
-print(f"Loading dataset from {data_path}...")
-df = pd.read_csv(data_path)
+X_raw = df[FEATURE_NAMES]
+y_raw = df["Label"]
 
-# 1. Clean inf/NaN values from raw CIC-IDS network captures
-df = df.replace([np.inf, -np.inf], np.nan)
-df = df.dropna()
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y_raw)
 
-# 2. Drop non-numeric identifier columns
-cols_to_drop = ['Flow ID', 'Src IP', 'Dst IP', 'Timestamp']
-df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
-
-# 3. Extract features & clip extreme numerical values to fit float32
-X_raw = df.drop(columns=['Label']).values.astype(np.float64)
-y_raw = df['Label'].values
-X_raw = np.clip(X_raw, -1e9, 1e9).astype(np.float32)
-
-# 4. Fit Scaler and Encoder
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X_raw)
 
-encoder = LabelEncoder()
-y_encoded = encoder.fit_transform(y_raw)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_encoded, test_size=0.2, random_state=42)
 
-joblib.dump(scaler, 'training_pipeline/feature_scaler.pkl')
-joblib.dump(encoder, 'training_pipeline/label_encoder.pkl')
+def create_sequences(data, labels, seq_len=5):
+    xs, ys = [], []
+    for i in range(len(data) - seq_len):
+        xs.append(data[i:(i + seq_len)])
+        ys.append(labels[i + seq_len])
+    return np.array(xs), np.array(ys)
 
-print(f"Mapped Classes: {dict(zip(encoder.classes_, encoder.transform(encoder.classes_)))}")
+X_seq, y_seq = create_sequences(X_scaled, y_encoded)
+X_seq_train, X_seq_test, y_seq_train, y_seq_test = train_test_split(X_seq, y_seq, test_size=0.2, random_state=42)
 
-# 5. Generate Sequence Windows (Filtering Fake Drop-Offs)
-window_size = 5
-X_seq, y_curr, y_next = [], [], []
+# Auto-create directories
+os.makedirs("backend", exist_ok=True)
+os.makedirs("training_pipeline/tmp", exist_ok=True)
 
-print("Generating sequence windows and stripping artificial boundaries...")
-for i in range(len(X_scaled) - window_size):
-    current_window_labels = y_raw[i : i + window_size]
-    next_label = y_raw[i + window_size]
-    
-    # Drop windows where 100% attack abruptly cuts to Benign due to capture limits
-    if np.all(current_window_labels != 'Benign') and next_label == 'Benign':
-        continue
-        
-    X_seq.append(X_scaled[i : i + window_size])
-    y_curr.append(y_encoded[i + window_size - 1])
-    y_next.append(y_encoded[i + window_size])
+# Drop artifacts directly where your API needs them
+joblib.dump(scaler, "backend/feature_scaler.pkl")
+joblib.dump(label_encoder, "backend/label_encoder.pkl")
 
-X_seq = np.array(X_seq, dtype=np.float32)
-y_curr = np.array(y_curr, dtype=np.int64)
-y_next = np.array(y_next, dtype=np.int64)
+np.save("training_pipeline/tmp/X_train.npy", X_train)
+np.save("training_pipeline/tmp/y_train.npy", y_train)
+np.save("training_pipeline/tmp/X_seq_train.npy", X_seq_train)
+np.save("training_pipeline/tmp/y_seq_train.npy", y_seq_train)
 
-np.save('training_pipeline/X_seq.npy', X_seq)
-np.save('training_pipeline/y_curr.npy', y_curr)
-np.save('training_pipeline/y_next.npy', y_next)
-
-print(f"Done. Successfully saved {len(X_seq)} sequence samples.")
+print("[+] Data Prep Complete. Scaler & Encoder deployed to backend/.")

@@ -63,12 +63,14 @@ MITRE_MAP = {
 class AttackForecasterTransformer(nn.Module):
     def __init__(self, feature_dim=16, seq_len=5, num_classes=3, d_model=64, nhead=4, num_layers=2):
         super(AttackForecasterTransformer, self).__init__()
-        self.input_projection = nn.Linear(feature_dim, d_model)
+        self.embedding = nn.Linear(feature_dim, d_model)
+        
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=128, batch_first=True
         )
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.fc_out = nn.Sequential(
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        self.fc = nn.Sequential(
             nn.Linear(d_model * seq_len, 64),
             nn.ReLU(),
             nn.Dropout(0.2),
@@ -76,10 +78,10 @@ class AttackForecasterTransformer(nn.Module):
         )
         
     def forward(self, x):
-        x = self.input_projection(x)
-        x = self.transformer_encoder(x)
+        x = self.embedding(x)
+        x = self.transformer(x)
         x = x.reshape(x.size(0), -1)
-        return self.fc_out(x)
+        return self.fc(x)
 
 # Loaded globally during startup
 scaler = None
@@ -105,71 +107,35 @@ stats_lock = threading.Lock()
 # Maintain a rolling window buffer of the last 5 flow feature vectors (5x16)
 flow_sequence_buffer = deque(maxlen=5)
 
-def analyze_sequence_window(sequence_window_raw):
+def analyze_sequence_window(window):
     """
-    Unified Inference Engine combining XGBoost current state classification,
-    PyTorch Transformer next-stage forecasting, and SHAP triggers.
+    window: NumPy array of shape (5, 16)
     """
-    if scaler is None or xgboost_model is None or transformer_model is None:
-        return None
-
-    df_raw = pd.DataFrame(sequence_window_raw, columns=FEATURE_NAMES)
-    sequence_scaled = scaler.transform(df_raw)
-    
-    # --- A. XGBoost Classification ---
-    xgb_input = sequence_scaled.reshape(1, -1)
-    current_class_idx = xgboost_model.predict(xgb_input)[0]
-    current_class_label = class_names[current_class_idx]
+    # 1. XGBoost Inference on latest timestamp (1, 16)
+    xgb_input = window[-1].reshape(1, -1)
     current_probs = xgboost_model.predict_proba(xgb_input)[0]
-    current_confidence = float(np.max(current_probs))
+    current_class_idx = np.argmax(current_probs)
+    current_stage = label_encoder.inverse_transform([current_class_idx])[0]
+    confidence = float(np.max(current_probs) * 100)
     
-    # --- B. PyTorch Transformer Forecast ---
-    tensor_input = torch.tensor(sequence_scaled, dtype=torch.float32).unsqueeze(0)
+    # 2. PyTorch Transformer Forecast on sequence (1, 5, 16)
+    transformer_input = torch.tensor(window, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
-        logits = transformer_model(tensor_input)
-        forecast_probs = torch.softmax(logits, dim=1).numpy()[0]
+        forecast_logits = transformer_model(transformer_input)
+        forecast_probs = torch.softmax(forecast_logits, dim=1).numpy()[0]
+        forecast_class_idx = np.argmax(forecast_probs)
+        predicted_stage = label_encoder.inverse_transform([forecast_class_idx])[0]
         
-    forecast_class_idx = np.argmax(forecast_probs)
-    forecast_class_label = class_names[forecast_class_idx]
-    forecast_confidence = float(forecast_probs[forecast_class_idx])
-    
-    # --- C. SHAP Feature Attribution ---
-    try:
-        shap_vals = shap_explainer(xgb_input)
-        if len(shap_vals.values.shape) == 3:
-            feature_importance = np.abs(shap_vals.values[0, :, current_class_idx])
-        else:
-            feature_importance = np.abs(shap_vals.values[0])
-            
-        feature_importance_reshaped = feature_importance.reshape(5, 16).mean(axis=0)
-        top_feature_indices = np.argsort(feature_importance_reshaped)[::-1][:3]
-        
-        top_triggers = [
-            {
-                "feature": FEATURE_NAMES[idx],
-                "value": round(float(sequence_window_raw[-1][idx]), 2),
-                "importance_score": float(feature_importance_reshaped[idx])
-            }
-            for idx in top_feature_indices
-        ]
-    except Exception:
-        top_triggers = []
+    # 3. Calculate Risk Score (Dynamic based on attack class probability)
+    risk_score = round(float((1.0 - current_probs[0]) * 100), 2) if len(current_probs) > 1 else round(confidence, 2)
 
-    # --- D. Dynamic Risk Score Calculation ---
-    base_risk = 10 if current_class_label == "Benign" else 70
-    threat_multiplier = 1.0 if current_class_label == "Benign" else 1.3
-    risk_score = min(100, int((base_risk * current_confidence * threat_multiplier) + (forecast_confidence * 15)))
-
-    mitre_stage = MITRE_MAP.get(current_class_label, "Reconnaissance / Normal")
-    
     return {
-        "predicted_attack": current_class_label,
-        "confidence": round(current_confidence * 100, 2),
-        "predicted_next_attack": forecast_class_label,
-        "forecast_confidence": round(forecast_confidence * 100, 2),
+        "current_stage": current_stage,
+        "predicted_stage": predicted_stage,
+        "confidence": confidence,
         "risk_score": risk_score,
-        "mitre_stage": mitre_stage,
-        "top_triggers": top_triggers
+        "current_class": current_stage,       
+        "forecast_class": predicted_stage     
     }
 
 def get_local_fallback():
@@ -283,124 +249,39 @@ async def root():
         "traffic_source": "pyshark_live_capture" if pyshark else "psutil_fallback"
     }
 
+def build_network_update(node_id, window, packets=0, bytes=0):
+    window_arr = np.array(window)
+    
+    # Transformer expects exactly 5 vectors. Don't crash if the buffer is still warming up.
+    if window_arr.ndim < 2 or len(window_arr) < 5:
+        return {
+            "node_id": node_id,
+            "packets_delta": packets,
+            "bytes_delta": bytes,
+            "risk_score": 0.0,
+            "current_stage": "Initializing...",
+            "predicted_stage": "Initializing...",
+            "confidence": 0.0,
+            "details": {}
+        }
+        
+    inference = analyze_sequence_window(window_arr)
+    
+    return {
+        "node_id": node_id,
+        "packets_delta": packets,
+        "bytes_delta": bytes,
+        "risk_score": inference.get("risk_score", 0.0),
+        "current_stage": inference.get("current_stage", "Unknown"),
+        "predicted_stage": inference.get("predicted_stage", "Unknown"),
+        "confidence": inference.get("confidence", 0.0),
+        "details": inference
+    }
+
 @app.get("/api/alerts")
 async def alerts():
-    return build_network_update(0, 0)
-
-def build_network_update(packets_per_second, bytes_per_second):
     snapshot = get_capture_snapshot()
-
-    if pyshark and snapshot["packets"] > 0:
-        flows = snapshot["flows"]
-        packets = packets_per_second
-        incoming = 0
-        outgoing = 0
-        source = "pyshark_live_capture"
-        protocol_counts = snapshot["protocols"]
-    else:
-        live = get_local_fallback()
-        flows = live["flows"]
-        packets = packets_per_second or 0
-        incoming = live["incoming"]
-        outgoing = live["outgoing"]
-        source = "psutil_fallback"
-        protocol_counts = live["protocols"]
-
-    # Fill sequence window with dummy/zero sequences if less than 5 packets captured yet
-    buffer = snapshot["buffer"]
-    if len(buffer) < 5:
-        pad_size = 5 - len(buffer)
-        padded_buffer = [[0.0] * 16] * pad_size + buffer
-    else:
-        padded_buffer = buffer[-5:]
-
-    #raw_window = np.array(padded_buffer, dtype=np.float32)
-    # =====================================================================
-    # MULTI-STAGE SEQUENCE TEST SUITE
-    # =====================================================================
-
-    # 1. Define distinct state feature vectors (DstPort, Proto, FlowDur, TotFwdPkts, TotBwdPkts, ...)
-    BENIGN_VEC     = [80.0, 6.0, 0.5, 2.0, 2.0, 100.0, 500.0, 50.0, 0.0, 1200.0, 8.0, 0.1, 0.01, 0.0, 0.0, 1.0]
-    SSH_BRUTE_VEC  = [22.0, 6.0, 0.001, 250.0, 0.0, 12000.0, 0.0, 1460.0, 0.0, 5000000.0, 100000.0, 0.0001, 0.00001, 1.0, 0.0, 0.0]
-    PORT_SCAN_VEC  = [443.0, 6.0, 0.0005, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10000.0, 2000.0, 0.0001, 0.00001, 1.0, 0.0, 0.0]
-    POST_EXPLOIT_VEC = [22.0, 6.0, 0.05, 45.0, 40.0, 3500.0, 8000.0, 512.0, 64.0, 230000.0, 1700.0, 0.001, 0.0005, 0.0, 0.0, 1.0]
-
-    # 2. Define test scenarios
-    test_scenarios = {
-        "Scenario A (Pure SSH Brute Force)": 
-            np.array([SSH_BRUTE_VEC] * 5, dtype=np.float32),
-            
-        "Scenario B (SSH Brute Force -> Post-Exploitation Transition)": 
-            np.array([SSH_BRUTE_VEC, SSH_BRUTE_VEC, SSH_BRUTE_VEC, POST_EXPLOIT_VEC, POST_EXPLOIT_VEC], dtype=np.float32),
-            
-        "Scenario C (Port Scan -> SSH Brute Force Transition)": 
-            np.array([PORT_SCAN_VEC, PORT_SCAN_VEC, PORT_SCAN_VEC, SSH_BRUTE_VEC, SSH_BRUTE_VEC], dtype=np.float32),
-            
-        "Scenario D (Pure Benign Baseline)": 
-            np.array([BENIGN_VEC] * 5, dtype=np.float32),
-    }
-
-    # 3. Execute test suite and print results directly to console
-    print("\n" + "="*60)
-    print("     RUNNING SEQUENTIAL MODEL TRANSITION TEST SUITE     ")
-    print("="*60)
-
-    for name, window in test_scenarios.items():
-        res = analyze_sequence_window(window)
-        current = res.get("predicted_attack", "Unknown") if res else "N/A"
-        next_stage = res.get("predicted_next_attack", "Unknown") if res else "N/A"
-        confidence = res.get("confidence", 0.0) if res else 0.0
-        
-        print(f"\n[+] {name}")
-        print(f"    --> Detected Current Stage : {current}")
-        print(f"    --> Predicted Next Stage    : {next_stage}")
-        print(f"    --> Confidence             : {confidence:.2%}")
-
-    print("\n" + "="*60 + "\n")
-
-    # Use Scenario B for the live application flow
-    raw_window = test_scenarios["Scenario B (SSH Brute Force -> Post-Exploitation Transition)"]
-    inference = analyze_sequence_window(raw_window)
-    #inference = analyze_sequence_window(raw_window)
-
-    if inference:
-        risk = inference["risk_score"]
-        status = "CRITICAL" if risk > 75 else ("ELEVATED" if risk > 45 else "MONITORING")
-        event = f"Detected: {inference['predicted_attack']}"
-        next_attack = inference["predicted_next_attack"]
-        mitre = inference["mitre_stage"]
-        confidence = inference["confidence"]
-        top_triggers = inference.get("top_triggers", [])
-    else:
-        anomaly = min(10.0, max(0.0, packets / 1000.0))
-        risk = min(100, round(anomaly * 10))
-        status = "MONITORING"
-        event = "Live network traffic"
-        next_attack = "Analyzing"
-        mitre = "—"
-        confidence = 0
-        top_triggers = []
-
-    return {
-        "type": "network_update",
-        "time": datetime.now().strftime("%H:%M:%S"),
-        "event": event,
-        "risk": risk,
-        "next_attack": next_attack,
-        "mitre": mitre,
-        "confidence": confidence,
-        "top_triggers": top_triggers,
-        "flows": flows,
-        "packets": packets,
-        "anomaly": round(risk / 10.0, 1),
-        "status": status,
-        "bytes_per_second": bytes_per_second,
-        "incoming_packets": incoming,
-        "outgoing_packets": outgoing,
-        "active_connections": flows,
-        "protocols": protocol_counts,
-        "source": source
-    }
+    return build_network_update("REST-API", snapshot.get("buffer", []), 0, 0)
 
 class ConnectionManager:
     def __init__(self):
@@ -415,7 +296,6 @@ class ConnectionManager:
 
     async def broadcast(self, data):
         dead = []
-
         for connection in self.active_connections:
             try:
                 await connection.send_json(data)
@@ -435,6 +315,7 @@ async def generate_live_data():
         await asyncio.sleep(1)
 
         snapshot = get_capture_snapshot()
+        buffer_data = snapshot.get("buffer", [])
 
         if pyshark and snapshot["packets"] > 0:
             packets_delta = snapshot["packets"] - previous_packets
@@ -448,9 +329,12 @@ async def generate_live_data():
             previous_packets = live["packets"]
             previous_bytes = live["bytes"]
 
+        # Actually pass the buffer data to the function, not the packet delta...
         data = build_network_update(
-            max(0, packets_delta),
-            max(0, bytes_delta)
+            node_id="LIVE-WS",
+            window=buffer_data,
+            packets=max(0, packets_delta),
+            bytes=max(0, bytes_delta)
         )
 
         if manager.active_connections:
@@ -460,19 +344,22 @@ async def generate_live_data():
 async def startup_event():
     global scaler, label_encoder, xgboost_model, shap_explainer, transformer_model, class_names
 
-    # Load ML Artifacts
     try:
-        # Resolve project root relative to main.py
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        current_dir = os.path.dirname(os.path.abspath(__file__))
         
         def get_path(filename):
-            path_in_root = os.path.join(base_dir, filename)
-            return path_in_root if os.path.exists(path_in_root) else filename
+            return os.path.join(current_dir, filename)
 
+        print(f"[*] Hunting for ML models in: {current_dir}")
+        
         scaler = joblib.load(get_path("feature_scaler.pkl"))
         label_encoder = joblib.load(get_path("label_encoder.pkl"))
         xgboost_model = joblib.load(get_path("xgboost_model.pkl"))
-        shap_explainer = joblib.load(get_path("shap_explainer.pkl"))
+        
+        try:
+            shap_explainer = joblib.load(get_path("shap_explainer.pkl"))
+        except FileNotFoundError:
+            shap_explainer = None
 
         class_names = label_encoder.classes_
         num_classes = len(class_names)
@@ -482,6 +369,7 @@ async def startup_event():
             seq_len=5, 
             num_classes=num_classes
         )
+        
         transformer_model.load_state_dict(
             torch.load(get_path("transformer_forecaster.pt"), map_location=torch.device('cpu'))
         )
@@ -489,7 +377,7 @@ async def startup_event():
 
         print("[+] NETFORESIGHT: All ML Models & Explainers successfully integrated!")
     except Exception as exc:
-        print(f"[-] Failed to load ML artifacts: {exc}")
+        print(f"[-] FATAL: Failed to load ML artifacts: {exc}")
 
     if pyshark is not None:
         threading.Thread(target=packet_capture_worker, daemon=True).start()
