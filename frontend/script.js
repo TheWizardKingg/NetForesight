@@ -230,7 +230,7 @@ let STATE = {
     event: "Detected: Benign",
     risk: 0,
     next_attack: "Benign",
-    mitre: "Reconnaissance / Normal",
+    mitre: "Reconnaissance",
     confidence: 0,
     top_triggers: [],
     flows: 0,
@@ -241,7 +241,7 @@ let STATE = {
 };
 
 for (let i = 0; i < 20; i++) {
-    STATE.trafficHistory.push({ flows: 10 + i, packets: 50 + i * 2 });
+    STATE.trafficHistory.push({ flows: 0, packets: 0 });
 }
 
 let CHARTS = {};
@@ -415,7 +415,7 @@ function updateUI() {
     for (let i = 0; i < 5; i++) {
         const bar = document.getElementById(`bar${i}`);
         if (bar) {
-            const h = Math.min(95, Math.max(15, (STATE.packets / 2) + rand(-10, 10)));
+            const h = Math.min(95, Math.max(15, (STATE.packets / 2) + rand(-5, 5)));
             bar.style.height = h + "%";
         }
     }
@@ -424,21 +424,55 @@ function updateUI() {
 }
 
 function applyLiveNetworkData(data) {
-    STATE.event = data.event ?? "Detected: Benign";
-    STATE.risk = Number(data.risk ?? 0);
-    STATE.next_attack = data.next_attack ?? "Benign";
-    STATE.mitre = data.mitre ?? "Reconnaissance";
-    STATE.confidence = Number(data.confidence ?? 0);
-    STATE.top_triggers = data.top_triggers ?? [];
-    STATE.flows = Number(data.flows ?? 0);
-    STATE.packets = Number(data.packets ?? 0);
-    STATE.anomaly = Number(data.anomaly ?? 0);
-    STATE.status = data.status ?? "MONITORING";
+    // Correctly handle both 'telemetry' and 'network_update' message formats from backend
+    STATE.flows = Number(data.flows_sec ?? data.pps ?? data.flows ?? 0);
+    STATE.packets = Number(data.packets_sec ?? data.pps ?? data.packets ?? 0);
+    STATE.status = data.status === "online" ? "MONITORING" : (data.status ?? "MONITORING");
+
+    if (data.event) STATE.event = data.event;
+    if (data.risk !== undefined) STATE.risk = Number(data.risk);
+    if (data.next_attack) STATE.next_attack = data.next_attack;
+    if (data.mitre) STATE.mitre = data.mitre;
+    if (data.confidence !== undefined) STATE.confidence = Number(data.confidence);
+    if (data.anomaly !== undefined) STATE.anomaly = Number(data.anomaly);
 
     STATE.trafficHistory.push({ flows: STATE.flows, packets: STATE.packets });
     if (STATE.trafficHistory.length > 20) STATE.trafficHistory.shift();
 
     updateUI();
+}
+
+function fetchLatestForecast() {
+    fetch("http://127.0.0.1:8000/api/predict/forecast")
+        .then(res => res.json())
+        .then(data => {
+            if (data.predicted_next_stage) {
+                STATE.next_attack = data.predicted_next_stage;
+                STATE.confidence = (data.confidence || 0) * 100;
+
+                // Map UNSW prediction classes to MITRE & Risk
+                const cls = (data.predicted_next_stage || "").toLowerCase();
+                if (cls.includes("normal") || cls.includes("benign")) {
+                    STATE.mitre = "Reconnaissance";
+                    STATE.risk = 10;
+                    STATE.event = "Detected: Benign";
+                } else if (cls.includes("reconnaissance") || cls.includes("fuzzers")) {
+                    STATE.mitre = "Reconnaissance";
+                    STATE.risk = 45;
+                    STATE.event = "Detected: Network Reconnaissance";
+                } else if (cls.includes("exploits") || cls.includes("shellcode")) {
+                    STATE.mitre = "Initial Access";
+                    STATE.risk = 85;
+                    STATE.event = "Detected: Active Exploitation";
+                } else {
+                    STATE.mitre = "Command and Control";
+                    STATE.risk = 65;
+                    STATE.event = `Detected: ${data.predicted_next_stage}`;
+                }
+                updateUI();
+            }
+        })
+        .catch(() => {});
 }
 
 function connectNetForeSightWebSocket() {
@@ -458,7 +492,7 @@ function connectNetForeSightWebSocket() {
     socket.addEventListener("message", event => {
         try {
             const data = JSON.parse(event.data);
-            if (data.type === "network_update") {
+            if (data.type === "telemetry" || data.type === "network_update") {
                 applyLiveNetworkData(data);
             }
         } catch (error) {
@@ -481,6 +515,9 @@ buildTreeAndRender();
 initCharts();
 updateUI();
 connectNetForeSightWebSocket();
+
+// Periodically fetch AI forecast from FastAPI backend
+setInterval(fetchLatestForecast, 2000);
 
 /* ================= NAV SCROLLSPY ================= */
 (function initScrollspy() {
