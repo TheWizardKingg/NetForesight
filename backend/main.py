@@ -162,10 +162,14 @@ def packet_capture_worker():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    interface = os.getenv("NETFORESIGHT_INTERFACE") or None
+    # If "Wi-Fi" still chokes, run `C:\Program Files\Wireshark\tshark.exe -D` 
+    # in your cmd and put the exact adapter number here instead (like "4")
+    interface = "Wi-Fi" 
+    tshark_path = r"C:\Program Files\Wireshark\tshark.exe"
 
     try:
-        capture = pyshark.LiveCapture(interface=interface)
+        # DO NOT PUT ANOTHER TRY BLOCK AFTER THIS
+        capture = pyshark.LiveCapture(interface=interface, tshark_path=tshark_path)
 
         for packet in capture.sniff_continuously():
             try:
@@ -227,7 +231,7 @@ def packet_capture_worker():
                 continue
 
     except Exception as exc:
-        print(f"Live packet capture unavailable: {exc}")
+        print(f"[-] Live packet capture violently crashed: {exc}")
     finally:
         loop.close()
         
