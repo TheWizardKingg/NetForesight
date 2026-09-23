@@ -11,13 +11,12 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import joblib
 
-# Optional PyShark import for packet sniffing
 try:
     import pyshark
 except ImportError:
     pyshark = None
 
-# Initialize FastAPI App
+#FastAPI App
 app = FastAPI(title="NetForesight Backend API", version="2.0")
 
 # Enable CORS for Frontend UI
